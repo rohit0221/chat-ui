@@ -1,10 +1,14 @@
+import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import ChatApp from "./ChatApp";
 
 function App() {
   return (
-    <div className="flex justify-center items-center h-screen bg-gray-200">
-      <ChatApp />
-    </div>
+    <Router>
+      <Routes>
+        <Route path="/" element={<ChatApp />} />
+        <Route path="/c/:sessionId" element={<ChatApp />} />
+      </Routes>
+    </Router>
   );
 }
 
