@@ -28,28 +28,23 @@ const ChatApp = () => {
 
   // ✅ End current session & generate summary
   const endSession = async () => {
-    if (!sessionId) return; // ✅ No active session, nothing to do
+    if (!sessionId) return;
   
     console.log("🔹 Ending session:", sessionId);
-  
     try {
-      // ✅ Save session summary before clearing
-      await axios.post(`${API_BASE_URL}/save_summary/${sessionId}?user_id=user_123`);
-  
+      await axios.post(`${API_BASE_URL}/end_session/${sessionId}`);
       console.log("✅ Session summary saved.");
   
-      // ✅ Immediately update sidebar list
-      const res = await axios.get(`${API_BASE_URL}/conversations/user_123`);
-      setConversations(res.data.conversations);
-  
-      console.log("✅ Sidebar updated with new session.");
+      // ✅ Update sidebar after ending session
+      fetchConversations();
     } catch (error) {
-      console.error("❌ Failed to end session or update sidebar:", error);
+      console.error("❌ Failed to end session:", error);
     }
   
-    // ✅ Reset chat UI after ending session
-    setMessages([]);
+    setMessages([]); // ✅ Reset chat messages
   };
+  
+  
   
   
 
@@ -58,54 +53,70 @@ const ChatApp = () => {
     if (sessionId) {
       try {
         console.log("🔹 Ending session before starting a new one...");
-  
-        await endSession(); // ✅ Properly end session
-  
-        // ✅ Refresh sidebar after ending session
-        const res = await axios.get(`${API_BASE_URL}/conversations/user_123`);
-        setConversations(res.data.conversations);
-        console.log("✅ Sidebar updated after session end.");
-        
+        await endSession(); // ✅ Already fetches conversations inside endSession()
       } catch (error) {
         console.error("❌ Failed to end session before starting a new chat:", error);
       }
     }
   
-    navigate("/"); // ✅ Reset URL (New session will be created when user sends a message)
+    navigate("/"); // ✅ Reset URL after ending session
   };
+  
+  
+  
+  
+  
   
   
 
   // ✅ Detect when user loads `/` (base URL) without a session and end any active session
   useEffect(() => {
     if (!sessionId && location.pathname === "/") {
-      endSession(); // ✅ Ends previous session when user starts fresh
+      console.log("🔹 No session found. Ending any active session...");
+      endSession(); // ✅ Ensures Redis/PostgreSQL cleanup
     }
   }, [sessionId, location.pathname]);
   
   
+  
 
   // ✅ Load chat history when session ID changes
+  const [loading, setLoading] = useState(false);
+
   useEffect(() => {
     if (!sessionId) return;
 
+    setLoading(true); // ✅ Show loading state
+
     axios.get(`${API_BASE_URL}/chat_history/${sessionId}`)
       .then((response) => {
-        const pastMessages = response.data.messages.map((msg: any) => ({
-          role: msg.role,
-          text: msg.message,
-        }));
-        setMessages(pastMessages);
+        if (response.data.messages) {
+          const pastMessages = response.data.messages.map((msg: any) => ({
+            role: msg.role,
+            text: msg.message,
+          }));
+          setMessages(pastMessages);
+        }
       })
-      .catch((error) => console.error("Failed to load past messages:", error));
+      .catch((error) => console.error("Failed to load past messages:", error))
+      .finally(() => setLoading(false)); // ✅ Hide loading state
   }, [sessionId]);
+
+  // ✅ Detect session ID changes (useful for debugging)
+  useEffect(() => {
+    if (sessionId) {
+      console.log("🔹 Detected session change:", sessionId);
+    }
+  }, [sessionId]);  // ✅ Runs every time sessionId changes
+
 
   // ✅ Load sidebar past sessions
   useEffect(() => {
     axios.get(`${API_BASE_URL}/conversations/user_123`)
       .then((response) => setConversations(response.data.conversations))
       .catch((error) => console.error("Failed to load past sessions:", error));
-  }, []);
+  }, []); // ✅ Runs on first render
+  
 
   // Scroll chat to latest message
   useEffect(() => {
@@ -116,43 +127,54 @@ const ChatApp = () => {
 
   const sendMessage = async () => {
     if (!input.trim()) return;
-
-    // ✅ If no session exists, create a new session and update the URL
-    if (!sessionId) {
-      const newSessionId = Math.random().toString(36).substring(2, 15);
-      navigate(`/c/${newSessionId}`);
-      return;
+  
+    let activeSessionId = sessionId;
+  
+    // ✅ If no session exists, create a new session & update URL
+    if (!activeSessionId) {
+      activeSessionId = Math.random().toString(36).substring(2, 15);
+      navigate(`/c/${activeSessionId}`, { replace: true }); // ✅ Update URL
     }
-
+  
     const userMessage: Message = { role: "user", text: input };
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
-
+  
     try {
-      const response = await axios.post(`${API_BASE_URL}/chatbot`, {
-        user_id: "user_123",
-        session_id: sessionId,
-        message: input,
-      });
-
-      const aiResponse: Message = { role: "assistant", text: response.data.response };
-      setMessages((prev) => [...prev, aiResponse]);
-
-      // ✅ If session ends, refresh sidebar
-      if (response.data.status === "Session ended") {
-        console.log("🔹 Session ended! Reloading sidebar...");
-        axios.get(`${API_BASE_URL}/conversations/user_123`)
-          .then((res) => setConversations(res.data.conversations))
-          .catch((err) => console.error("Failed to refresh past sessions:", err));
-
-        navigate("/"); // Go back to homepage
-        return;
-      }
+      // ✅ Wait until URL updates before sending message
+      setTimeout(async () => {
+        const response = await axios.post(`${API_BASE_URL}/chatbot`, {
+          user_id: "user_123",
+          session_id: activeSessionId,
+          message: input,
+        });
+  
+        const aiResponse: Message = { role: "assistant", text: response.data.response };
+        setMessages((prev) => [...prev, aiResponse]);
+  
+        // ✅ If session ends, refresh sidebar & navigate back to `/`
+        if (response.data.status === "Session ended") {
+          console.log("🔹 Session ended! Reloading sidebar...");
+          const res = await axios.get(`${API_BASE_URL}/conversations/user_123`);
+          setConversations(res.data.conversations);
+          navigate("/"); // ✅ Reset URL after session ends
+        }
+      }, 100); // ✅ Small delay ensures session is correctly used
     } catch (error) {
       console.error("Chat API error:", error);
       setMessages((prev) => [...prev, { role: "assistant", text: "⚠️ Error: Unable to reach AI." }]);
     }
   };
+  
+  const fetchConversations = async () => {
+    try {
+      const res = await axios.get(`${API_BASE_URL}/conversations/user_123`);
+      setConversations(res.data.conversations);
+    } catch (error) {
+      console.error("❌ Failed to fetch past sessions:", error);
+    }
+  };
+    
 
   return (
     <div className="h-screen w-screen flex">
@@ -183,14 +205,19 @@ const ChatApp = () => {
       <main className="flex-1 flex flex-col bg-gray-100 h-full">
         {/* Chat Messages */}
         <div ref={chatContainerRef} className="flex-1 overflow-y-auto p-6 space-y-4 flex flex-col justify-end">
-          {messages.map((msg, i) => (
-            <div key={i} className="flex flex-col items-start">
-              <div className={`rounded-lg px-4 py-2 max-w-3xl ${msg.role === "user" ? "bg-blue-500 text-white self-end" : "bg-gray-200 text-gray-800 self-start"}`}>
-                {msg.text}
+          {loading ? (
+            <div className="text-center text-gray-500">🔄 Loading chat...</div>
+          ) : (
+            messages.map((msg, i) => (
+              <div key={i} className="flex flex-col items-start">
+                <div className={`rounded-lg px-4 py-2 max-w-3xl ${msg.role === "user" ? "bg-blue-500 text-white self-end" : "bg-gray-200 text-gray-800 self-start"}`}>
+                  {msg.text}
+                </div>
               </div>
-            </div>
-          ))}
+            ))
+          )}
         </div>
+
 
         {/* Input Bar */}
         <div className="p-4 border-t bg-white flex items-center gap-2">
