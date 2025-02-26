@@ -4,8 +4,8 @@ import { Button } from "./components/ui/button";
 import { Send } from "lucide-react";
 import axios from "axios";
 
-// Define API URL (replace with actual backend URL)
-const API_BASE_URL = "http://localhost:8000"; // Adjust if backend is hosted elsewhere
+// Define API URL
+const API_BASE_URL = "http://localhost:8000"; // Adjust based on your backend
 
 interface Message {
   role: "user" | "assistant";
@@ -15,8 +15,32 @@ interface Message {
 const ChatApp = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
-  const [sessionId, setSessionId] = useState(() => Math.random().toString(36).substring(7)); // Generate session ID
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
+
+  // Load session ID from localStorage (or create a new one)
+  useEffect(() => {
+    let storedSessionId = localStorage.getItem("session_id");
+    if (!storedSessionId) {
+      storedSessionId = Math.random().toString(36).substring(7);
+      localStorage.setItem("session_id", storedSessionId);
+    }
+    setSessionId(storedSessionId);
+  
+    // ✅ Fetch past messages if session exists
+    if (storedSessionId) {
+      axios.get(`${API_BASE_URL}/chat_history/${storedSessionId}`)
+        .then((response) => {
+          const pastMessages = response.data.messages.map((msg: any) => ({
+            role: msg.role,
+            text: msg.message,
+          }));
+          setMessages(pastMessages);
+        })
+        .catch((error) => console.error("Failed to load past messages:", error));
+    }
+  }, []);
+  
 
   // Scroll chat to latest message
   useEffect(() => {
@@ -26,7 +50,7 @@ const ChatApp = () => {
   }, [messages]);
 
   const sendMessage = async () => {
-    if (!input.trim()) return;
+    if (!input.trim() || !sessionId) return;
 
     const userMessage: Message = { role: "user", text: input };
     setMessages((prev) => [...prev, userMessage]); // Show user message instantly
@@ -35,14 +59,13 @@ const ChatApp = () => {
     try {
       // Send message to backend
       const response = await axios.post(`${API_BASE_URL}/chatbot`, {
-        user_id: "user_123", // Replace with real user ID if needed
-        session_id: sessionId,
+        user_id: "user_123", // Replace with actual user ID if available
+        session_id: sessionId, // Send session ID
         message: input,
       });
 
       const aiResponse: Message = { role: "assistant", text: response.data.response };
       setMessages((prev) => [...prev, aiResponse]); // Display AI response
-
     } catch (error) {
       console.error("Chat API error:", error);
       setMessages((prev) => [...prev, { role: "assistant", text: "⚠️ Error: Unable to reach AI." }]);
@@ -51,24 +74,21 @@ const ChatApp = () => {
 
   return (
     <div className="h-screen w-screen flex">
-      {/* Sidebar (Fixed) */}
+      {/* Sidebar */}
       <aside className="w-64 bg-gray-900 text-white p-4 flex flex-col">
         <h1 className="text-2xl font-semibold mb-6">ChatGPT UI</h1>
 
-        {/* New Chat Button */}
-        <button onClick={() => setMessages([])} className="w-full mb-4 py-2 px-3 bg-gray-700 hover:bg-gray-600 rounded-md text-left">
+        {/* New Chat Button (Clears Session) */}
+        <button
+          onClick={() => {
+            localStorage.removeItem("session_id"); // Remove session
+            setMessages([]);
+            setSessionId(null); // Force a new session
+          }}
+          className="w-full mb-4 py-2 px-3 bg-gray-700 hover:bg-gray-600 rounded-md text-left"
+        >
           + New Chat
         </button>
-
-        {/* Placeholder for Conversations */}
-        <nav className="flex-1 space-y-2 overflow-auto">
-          <button className="w-full py-2 px-3 bg-gray-800 hover:bg-gray-700 rounded-md text-left">
-            Conversation 1
-          </button>
-          <button className="w-full py-2 px-3 bg-gray-800 hover:bg-gray-700 rounded-md text-left">
-            Conversation 2
-          </button>
-        </nav>
       </aside>
 
       {/* Chat Section */}
