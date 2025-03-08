@@ -20,7 +20,8 @@ interface Conversation {
 const ChatApp = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { sessionId } = useParams<{ sessionId: string }>(); // Get session ID from URL
+  const { sessionId } = useParams<{ sessionId: string }>();
+  console.log("🔹 Current URL sessionId:", sessionId);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -51,16 +52,19 @@ const ChatApp = () => {
   // ✅ Handle "New Chat" button click
   const startNewChat = async () => {
     if (sessionId) {
-      try {
-        console.log("🔹 Ending session before starting a new one...");
-        await endSession(); // ✅ Already fetches conversations inside endSession()
-      } catch (error) {
-        console.error("❌ Failed to end session before starting a new chat:", error);
-      }
+      console.log("🔹 Ending session before starting a new one...");
+      await endSession();  // ✅ Ensure session ends before creating a new one
     }
   
-    navigate("/"); // ✅ Reset URL after ending session
+    // ✅ Generate a new unique session ID
+    const newSessionId = Math.random().toString(36).substring(2, 15);
+  
+    navigate(`/c/${newSessionId}`, { replace: true }); // ✅ Ensure URL updates
+    setMessages([]); // ✅ Clear UI before starting fresh
   };
+  
+  
+  
   
   
   
@@ -85,29 +89,38 @@ const ChatApp = () => {
 
   useEffect(() => {
     if (!sessionId) return;
-
-    setLoading(true); // ✅ Show loading state
-
+  
+    console.log("🔹 Fetching chat history for session:", sessionId);
+    setLoading(true);
+  
     axios.get(`${API_BASE_URL}/chat_history/${sessionId}`)
       .then((response) => {
+        console.log("✅ Chat history received:", response.data);
+  
         if (response.data.messages) {
           const pastMessages = response.data.messages.map((msg: any) => ({
             role: msg.role,
             text: msg.message,
           }));
+  
+          console.log("📝 Updating messages state with:", pastMessages);
           setMessages(pastMessages);
+        } else {
+          console.log("⚠️ No messages found, clearing chat.");
+          setMessages([]);
         }
       })
-      .catch((error) => console.error("Failed to load past messages:", error))
-      .finally(() => setLoading(false)); // ✅ Hide loading state
-  }, [sessionId]);
+      .catch((error) => console.error("❌ Failed to load past messages:", error))
+      .finally(() => setLoading(false));
+  }, [sessionId]); // ✅ Fetch chat history when sessionId changes
+  
+  
 
   // ✅ Detect session ID changes (useful for debugging)
   useEffect(() => {
-    if (sessionId) {
-      console.log("🔹 Detected session change:", sessionId);
-    }
-  }, [sessionId]);  // ✅ Runs every time sessionId changes
+    console.log("🔹 URL changed, detected session:", sessionId);
+  }, [sessionId]);  // ✅ React should trigger this when URL changes
+  
 
 
   // ✅ Load sidebar past sessions
@@ -169,11 +182,12 @@ const ChatApp = () => {
   const fetchConversations = async () => {
     try {
       const res = await axios.get(`${API_BASE_URL}/conversations/user_123`);
-      setConversations(res.data.conversations);
+      setConversations(res.data.conversations); // ✅ Replace, don't append
     } catch (error) {
       console.error("❌ Failed to fetch past sessions:", error);
     }
   };
+  
     
 
   return (
@@ -189,15 +203,23 @@ const ChatApp = () => {
 
         {/* ✅ Sidebar: List of Past Conversations */}
         <div className="space-y-2">
-          {conversations.map((conv) => (
-            <button
-              key={conv.session_id}
-              onClick={() => navigate(`/c/${conv.session_id}`)}
-              className="w-full py-2 px-3 bg-gray-800 hover:bg-gray-700 rounded-md text-left truncate"
-            >
-              {conv.summary}
-            </button>
-          ))}
+        {conversations.map((conv) => (
+          <button
+            key={conv.session_id}
+            onClick={() => {
+              if (sessionId !== conv.session_id) {  // ✅ Prevent unnecessary reloads
+                console.log("🔹 Switching to session:", conv.session_id);
+                navigate(`/c/${conv.session_id}`, { replace: true }); // ✅ Update URL correctly
+                setMessages([]); // ✅ Clear UI before loading a new one
+              }
+            }}
+            className={`w-full py-2 px-3 bg-gray-800 hover:bg-gray-700 rounded-md text-left truncate 
+              ${sessionId === conv.session_id ? "bg-gray-600" : ""}`} // ✅ Highlight active session
+          >
+            {conv.summary}
+          </button>
+        ))}
+
         </div>
       </aside>
 
